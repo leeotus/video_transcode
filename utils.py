@@ -1,26 +1,8 @@
-from fractions import Fraction
-from typing import Any, Dict, Optional
 import logging
-from constant import *
+from fractions import Fraction
 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger()
-
-def video_color_params(video_info, out_kwargs):
-    colorspace = video_info.get("color_space")
-    if colorspace not in COLOR_SPACE.values():
-        colorspace = COLOR_SPACE.get(colorspace, "unspecified")
-    out_kwargs["colorspace"] = colorspace
-
-    color_trc = video_info.get("color_transfer")
-    if color_trc not in COLOR_TRC.values():
-        color_trc = COLOR_TRC.get(color_trc, "unspecified")
-    out_kwargs["color_trc"] = color_trc
-
-    color_primaries = video_info.get("color_primaries")
-    if color_primaries not in COLOR_PRIM.values():
-        color_primaries = COLOR_PRIM.get(color_primaries, "unspecified")
-    out_kwargs["color_primaries"] = color_primaries
-
 
 def get_video_info(probe_info):
     video_stream = next(
@@ -30,143 +12,8 @@ def get_video_info(probe_info):
     assert video_stream is not None
     return video_stream
 
-def video_corp(video_info, out_kwargs):
-    if video_info["width"] % 2 != 0 or video_info["height"] % 2 != 0:
-        if out_kwargs.get("vf"):
-            out_kwargs["vf"] += ",crop=trunc(iw/2)*2:trunc(ih/2)*2"
-        else:
-            out_kwargs["vf"] = "crop=trunc(iw/2)*2:trunc(ih/2)*2"
-
-def video_rescale(video_info, out_kwargs, dst_width, dst_height):
-    if video_info["width"] < video_info["height"]:
-        dst_width, dst_height = dst_height, dst_width
-
-    if video_info["width"] / video_info["height"] >= dst_width / dst_height:
-        if video_info["width"] > dst_width:
-            if out_kwargs.get("vf"):
-                out_kwargs["vf"] += "," + "scale=w={w}:h=-2".format(w=dst_width)
-            else:
-                out_kwargs["vf"] = "scale=w={w}:h=-2".format(w=dst_width)
-    else:
-        if video_info["height"] > dst_height:
-            if out_kwargs.get("vf"):
-                out_kwargs["vf"] += "," + "scale=w=-2:h={h}".format(h=dst_height)
-            else:
-                out_kwargs["vf"] = "scale=w=-2:h={h}".format(h=dst_height)
-
 def check_hdr_video(video_info):
-    if (
-        video_info.get("color_space") == "bt2020nc"
-        and video_info.get("color_transfer") in ("arib-std-b67", "smpte2084")
-        and video_info.get("color_primaries") == "bt2020"
-    ):
-        return True
-    else:
-        return False
-
-def hdr_to_sdr(out_kwargs):
-    vf = (
-        "zscale=t=linear:npl=100,tonemap=tonemap=hable:desat=0,"
-        "zscale=t=bt709:p=bt709:m=bt709:r=tv,format=yuv420p"
-    )
-    if out_kwargs.get("vf"):
-        out_kwargs["vf"] += "," + vf
-    else:
-        out_kwargs["vf"] = vf
-    for key in ("colorspace", "color_trc", "color_primaries"):
-        out_kwargs[key] = "bt709"
-
-"""
-def add_hdr_x265_params(out_kwargs):
-    hdr_params = (
-        "aq-mode=3:"
-        "aq-strength=0.6:"
-        "rc-lookahead=60:"
-        "bframes=4:"
-        "b-adapt=2:"
-        "ref=4:"
-        "me=star:"
-        "merange=32:"
-        "subme=4:"
-        "deblock=0,0:"
-        "psy-rd=2.0:"
-        "psy-rdoq=1.0:"
-        "hdr-opt=1:"
-        "repeat-headers=1:"
-        "no-open-gop=1"
-    )
-    existing = out_kwargs.get("x265-params")
-    out_kwargs["x265-params"] = f"{existing}:{hdr_params}" if existing else hdr_params
-"""
-
-def add_hdr_x265_params(out_kwargs, video_info, *, enable_quality_params = True):
-    """ add corresponding x265 parameters for input video
-
-    Args:
-        out_kwargs (Dict[str, Any]): output video parameters
-        video_info (Dict[Str, Any]): video information gained from ffprobe
-        enable_quality_params (bool, optional): Whether to turn on quality parameters or not. Defaults to True.
-    """
-    hdr_format = detect_hdr_format(video_info) # detect hdr format
-    logger.info("Detected video format: %s", hdr_format)
-    if hdr_format == "sdr":
-        # no need to add hdr params
-        return
-
-    params = {}
-    if enable_quality_params:
-        params.update({
-            "aq-mode":"3",
-            "aq-strength":"0.6",
-            "rc-lookahead":"60",
-            "bframes":"4",
-            "b-adapt":"2",
-            "ref":"4",
-            "me":"star",
-            "merange":"32",
-            "subme":"4",
-            "deblock":"0,0",
-            "psy-rd":"2.0",
-            "psy-rdoq":"1.0",
-        })
-        
-    # TODO: detect hdr10+ format
-    if hdr_format in ("hdr10", "dolby_vision"):
-        params.update({
-            "hdr10": "1",
-            "hdr-opt": "1",
-            "repeat-headers": "1",
-            "no-open-gop": "1",
-            "colorprim": "bt2020",
-            "transfer": "smpte2084",
-            "colormatrix": "bt2020nc",
-        })
-        
-        # TODO: get mastering display metadata from video info
-        master_display = None
-        if master_display:
-            params["master-display"] = master_display
-            
-        # TODO: get max cll and max fall from video info
-        max_cll = None
-        if max_cll:
-            params["max-cll"] = max_cll
-        
-        if hdr_format in ("dolby_vision"):
-            logger.warning("%s dynamic metadata not supported yet", hdr_format)
-    elif hdr_format in ("hlg"):
-        # different from hdr10
-        params.update(
-            {
-                "repeat-headers": "1",
-                "no-open-gop": "1",
-                "colorprim": "bt2020",
-                "transfer": "arib-std-b67",
-                "colormatrix": "bt2020nc",
-            }
-        )
-        
-    _merge_x265_params(out_kwargs, params)
+    return detect_hdr_format(video_info) != "sdr"
 
 
 def _get_side_data_types(video_info):
@@ -183,6 +30,26 @@ def _get_side_data_types(video_info):
         for item in side_data_list
         if isinstance(item, dict)
     ]
+    
+def _find_side_data(video_info, keyword:str):
+    """ find the side_data according to the input keyword
+
+    Args:
+        video_info (Dict[str, Any]): input video information gained from ffprobe
+        keyword (str): side_data_type keyword
+    """
+    side_data_list = video_info.get("side_data_list") or []
+    
+    for side_data in side_data_list:
+        if not isinstance(side_data, dict):
+            continue
+        
+        # get side data type
+        side_data_type = str(side_data.get("side_data_type", "")).lower()
+        if keyword.lower() in side_data_type:
+            return side_data    # already found the side_data
+        
+        return None
 
 def detect_hdr_format(video_info):
     """ detect hdr format
@@ -196,12 +63,12 @@ def detect_hdr_format(video_info):
     color_space = video_info.get("color_space")
     color_transfer = video_info.get("color_transfer")
     color_primaries = video_info.get("color_primaries")
-    
+
     side_data_types = _get_side_data_types(video_info)
-    
+
     if color_primaries != "bt2020":
         return "sdr"
-    
+
     if color_transfer == "arib-std-b67":
         return "hlg"
 
@@ -214,23 +81,86 @@ def detect_hdr_format(video_info):
 
     return "sdr"
 
-def _merge_x265_params(out_kwargs, params):
-    """ merge current x265 parameters into out_kwargs
+def _build_master_display(video_info):
+    metadata_keyword = "Mastering display metadata"
+    side_data = _find_side_data(video_info, metadata_keyword)
+    if not side_data:
+        return None
 
-    Args:
-        out_kwargs (Dict[str, str]): output video parameters
-        params (Dict[str, str]): current x265 parameters
-    """
-    current_params = ""
-    for key, value in params.items():
-        if(len(current_params) == 0):
-            current_params = f"{key}={value}"
-        else:
-            current_params = f"{current_params}:{key}={value}"
-        
-    existing = out_kwargs.get("x265-params")
-    if existing:
-        out_kwargs["x265-params"] = f"{existing}:{current_params}"
-    else:
-        out_kwargs["x265-params"] = current_params
+    red_x = _parse_chromaticity(side_data.get("red_x"))
+    red_y = _parse_chromaticity(side_data.get("red_y"))
+    green_x = _parse_chromaticity(side_data.get("green_x"))
+    green_y = _parse_chromaticity(side_data.get("green_y"))
+    blue_x = _parse_chromaticity(side_data.get("blue_x"))
+    blue_y = _parse_chromaticity(side_data.get("blue_y"))
+    white_x = _parse_chromaticity(side_data.get("white_point_x"))
+    white_y = _parse_chromaticity(side_data.get("white_point_y"))
+    min_luminance = _parse_luminance(side_data.get("min_luminance"))
+    max_luminance = _parse_luminance(side_data.get("max_luminance"))
 
+    values = (
+        red_x,
+        red_y,
+        green_x,
+        green_y,
+        blue_x,
+        blue_y,
+        white_x,
+        white_y,
+        min_luminance,
+        max_luminance,
+    )
+    if any(value is None for value in values):
+        return None
+    return (
+        f"G({green_x},{green_y})"
+        f"B({blue_x},{blue_y})"
+        f"R({red_x},{red_y})"
+        f"WP({white_x},{white_y})"
+        f"L({max_luminance},{min_luminance})"
+    )
+
+def _build_max_cll(video_info):
+    metadata_keyword = "Content light level metadata"
+    side_data = _find_side_data(video_info, metadata_keyword)
+    if not side_data:
+        # not found
+        return None
+    max_content = _parse_int(side_data.get("max_content"))
+    max_average = _parse_int(side_data.get("max_average"))
+
+    if max_content is None or max_average is None:
+        return None
+    return f"{max_content},{max_average}"
+
+def _parse_chromaticity(raw_value):
+    value = _parse_fraction(raw_value)
+    if value is None:
+        return None
+    return round(value * 50000)
+
+def _parse_luminance(raw_value):
+    value = _parse_fraction(raw_value)
+    if value is None:
+        return None
+    return round(value * 10000)
+
+def _parse_fraction(raw_value):
+    if raw_value is None:
+        return None
+
+    try:
+        return float(Fraction(raw_value))
+    except (ValueError, ZeroDivisionError):
+        logger.error("Invalid HDR metadata value: %s", raw_value)
+        return None
+
+def _parse_int(raw_value):
+    if raw_value is None:
+        return None
+
+    try:
+        return int(raw_value)
+    except (TypeError, ValueError):
+        logger.error("Invalid integer HDR metadata value: %s", raw_value)
+        return None

@@ -5,7 +5,10 @@ import logging
 
 import ffmpeg
 from utils import *
+from converter import *
+from etc.config import product_info
 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger()
 
 BASE_CONF = {
@@ -19,20 +22,6 @@ BASE_CONF = {
     "acodec": "aac",
     "audio_bitrate": "96k",
     "max_muxing_queue_size": 1024,
-}
-
-product_info = {
-    "product_key": {
-        "secret": "secret_for_signature",
-        "callback_url": "http://product.com/callback_url",
-        "token_url": "http://peekaboo.webapp.163.com/app/v1/video_trans/token",
-        "fp_upload_url": "http://pfp-int.ps.netease.com/peekaboo-test/file/new/",
-        "compress_rate_threshold": 0.2,
-        "crf_step_size": 3,
-        "max_crf_adj_num": 3,
-        "big_file_size": 500 * 1024 * 1024,
-        "crf": 25,
-    }
 }
 
 def transcode_video_impl(input_file, dst_params, hdr_filepath, sdr_filepath):
@@ -58,9 +47,6 @@ def transcode_video_impl(input_file, dst_params, hdr_filepath, sdr_filepath):
 
     out_kwargs = copy.deepcopy(BASE_CONF)  # video transcode parameters
 
-    # TODO: test
-    add_hdr_x265_params(out_kwargs)
-
     if product_info["product_key"].get("crf"):
         out_kwargs["crf"] = product_info["product_key"]["crf"]
 
@@ -75,43 +61,49 @@ def transcode_video_impl(input_file, dst_params, hdr_filepath, sdr_filepath):
     ) # video re-scale
 
     hdr_video = check_hdr_video(input_video_info)  # check if hdr video
-
     if hdr_video:
+        logger.info("hdr video detected")
         hdr_kwargs = copy.deepcopy(out_kwargs)
         if input_video_info.get("codec_tag_string") == "hvc1":
             hdr_kwargs["tag:v"] = "hvc1"
-        if input_file_video_codec == "hevc":  # use libx265 if hdr video
-            hdr_kwargs.update(
-                {
-                    "vcodec": "libx265",
-                    "crf": product_info["product_key"].get("h265_crf", BASE_CONF["crf"]),
-                }
-            )
+
+        # use libx265 if hdr video
+        hdr_kwargs.update(
+            {
+                "vcodec": "libx265",
+                "crf": product_info["product_key"].get("h265_crf", BASE_CONF["crf"]),
+            }
+        )
+        
+        add_hdr_x265_params(hdr_kwargs, input_video_info)
+        
         # hdr video transcode
+        logger.info("transcode into hdr video")
         _ = _ffmpeg_impl(input_file, hdr_kwargs, min_output_file_size, hdr_filepath)
 
-        hdr_to_sdr(out_kwargs)
+    convert_hdr2sdr(out_kwargs)
 
-        if out_kwargs.get("vf"):
-            if "format" not in out_kwargs["vf"]:
-                out_kwargs["vf"] += ",format=yuv420p"
-        else:
-            out_kwargs["vf"] = "format=yuv420p"
+    if out_kwargs.get("vf"):
+        if "format" not in out_kwargs["vf"]:
+            out_kwargs["vf"] += ",format=yuv420p"
+    else:
+        out_kwargs["vf"] = "format=yuv420p"
 
-        out_info = _ffmpeg_impl(input_file, out_kwargs, min_output_file_size, sdr_filepath)
-        output_video_info = get_video_info(out_info)
+    logger.info("transcode into sdr video")
+    out_info = _ffmpeg_impl(input_file, out_kwargs, min_output_file_size, sdr_filepath)
+    output_video_info = get_video_info(out_info)
 
-        video_rotate = output_video_info.get("tags", {}).get("rotate", 0)
-        if abs(int(video_rotate)) in (90, 270):
-            new_file_height, new_file_width = (
-                output_video_info["width"],
-                output_video_info["height"],
-            )
-        else:
-            new_file_width, new_file_height = (
-                output_video_info["width"],
-                output_video_info["height"],
-            )
+    video_rotate = output_video_info.get("tags", {}).get("rotate", 0)
+    if abs(int(video_rotate)) in (90, 270):
+        new_file_height, new_file_width = (
+            output_video_info["width"],
+            output_video_info["height"],
+        )
+    else:
+        new_file_width, new_file_height = (
+            output_video_info["width"],
+            output_video_info["height"],
+        )
 
     logger.info("transcode succeed.")
     return
