@@ -68,14 +68,15 @@ def transcode_video_impl(input_file, dst_params, hdr_filepath, sdr_filepath):
             hdr_kwargs["tag:v"] = "hvc1"
 
         # use libx265 if hdr video
-        hdr_kwargs.update(
-            {
-                "vcodec": "libx265",
-                "crf": product_info["product_key"].get("h265_crf", BASE_CONF["crf"]),
-            }
-        )
-        
-        add_hdr_x265_params(hdr_kwargs, input_video_info)
+        if input_file_video_codec == "hevc":  # use libx265 if hdr video
+            logger.info("input video codec is hevc")
+            hdr_kwargs.update(
+                {
+                    "vcodec": "libx265",
+                    "crf": product_info["product_key"].get("h265_crf", BASE_CONF["crf"]),
+                }
+            )
+            add_hdr_x265_params(hdr_kwargs, input_video_info)
         
         # hdr video transcode
         logger.info("transcode into hdr video")
@@ -160,4 +161,10 @@ if __name__ == '__main__':
     source = sys.argv[1]
     hdr = sys.argv[2]
     sdr = sys.argv[3]
+
+    # calculate duration
+    import time
+    start = time.time()
     main(source, hdr, sdr)
+    end = time.time()
+    logger.info("duration: %ss", end - start)
