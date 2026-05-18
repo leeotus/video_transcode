@@ -1,0 +1,45 @@
+COLOR_SPACE = {
+    "gbr": "rgb",
+    "bt709": "bt709",
+    "fcc": "fcc",
+    "bt470bg": "bt470bg",
+    "smpte170m": "smpte170m",
+    "smpte240m": "smpte240m",
+    "ycgco": "ycocg",
+    "bt2020nc": "bt2020_ncl",
+    "bt2020c": "bt2020_cl",
+    "smpte2085": "smpte2085",
+}
+
+COLOR_TRC = {
+    "bt709": "bt709",
+    "bt470m": "gamma22",
+    "bt470bg": "gamma28",
+    "smpte170m": "smpte170m",
+    "smpte240m": "smpte240m",
+    "linear": "linear",
+    "log100": "log",
+    "log316": "log_sqrt",
+    "iec61966-2-4": "iec61966_2_4",
+    "bt1361e": "bt1361",
+    "iec61966-2-1": "iec61966_2_1",
+    "bt2020-10": "bt2020_10bit",
+    "bt2020-20": "bt2020_12bit",
+    "smpte2084": "smpte2084",
+    "smpte428-1": "smpte428_1",
+    "arib-std-b67": "arib-std-b67",
+}
+
+COLOR_PRIM = {
+    "bt709": "bt709",
+    "bt470m": "bt470m",
+    "bt470bg": "bt470bg",
+    "smpte170m": "smpte170m",
+    "smpte240m": "smpte240m",
+    "film": "film",
+    "bt2020": "bt2020",
+    "smpte428-1": "smpte428_1",
+    "smpte428": "smpte428",
+    "smpte431": "smpte431",
+    "smpte432": "smpte432",
+}
