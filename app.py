@@ -77,12 +77,16 @@ def transcode_video_impl(input_file, dst_params, hdr_filepath, sdr_filepath):
                 }
             )
             add_hdr_x265_params(hdr_kwargs, input_video_info)
-        
+
+        # QUESTION need test: add x264-params, in case of some videos are encoded by x264 ?
+
         # hdr video transcode
         logger.info("transcode into hdr video")
         _ = _ffmpeg_impl(input_file, hdr_kwargs, min_output_file_size, hdr_filepath)
 
     convert_hdr2sdr(out_kwargs)
+    # TODO need test: improve x264 parameters
+    add_x264_params(out_kwargs)
 
     if out_kwargs.get("vf"):
         if "format" not in out_kwargs["vf"]:

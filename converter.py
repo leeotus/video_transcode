@@ -145,3 +145,28 @@ def add_hdr_x265_params(out_kwargs, video_info, *, enable_quality_params = True)
         )
         
     _merge_x265_params(out_kwargs, params)
+    
+def add_x264_params(out_kwargs):
+    if out_kwargs.get("vcodec", "") != "libx264":
+        logger.info("vcodec is not libx264, skip adding x264 params")
+        return
+    
+    out_kwargs.update(
+        {
+            "pix_fmt": "yuv420p",
+            "profile:v": "high",
+            "level:v": "4.1",
+            "tag:v": "avc1",
+            "preset": "veryfast",
+            
+            "x264-params": (
+                "keyint=60:"
+                "min-keyint=30:"
+                "scenecut=40:"
+                "ref=3:"
+                "bframes=3:"
+                "aq-mode=1:"
+                "aq-strength=1.0"
+            ),
+        }
+    )
