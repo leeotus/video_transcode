@@ -2,5 +2,9 @@ output/
 __pycache__/
 .vscode/
 
+node_modules/
+dist/
+.vite/
+
 *.py[cod]
 *$py.class

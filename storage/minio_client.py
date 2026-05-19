@@ -15,8 +15,14 @@ class MinioClient:
         self.endpoint = minio_config["endpoint"]
         self.access_key = minio_config["access_key"]
         self.secret_key = minio_config["secret_key"]
+        self.secure = minio_config.get("secure", False)
         try:
-            self.client = Minio(self.endpoint, access_key=self.access_key, secret_key=self.secret_key)
+            self.client = Minio(
+                self.endpoint,
+                access_key=self.access_key,
+                secret_key=self.secret_key,
+                secure=self.secure,
+            )
         except ValueError:
             logger.error("Minio client initialization failed")
             self.client = None  # failed to connect to the minio
