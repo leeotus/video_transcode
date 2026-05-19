@@ -1,4 +1,4 @@
-from minio_client import MinioClient
+from .minio_client import MinioClient
 
 """
   这里将FileUploader和MinioClient分离开是为了以后可能会在这里
