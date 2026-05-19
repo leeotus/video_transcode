@@ -9,4 +9,6 @@ from minio_client import MinioClient
 class FileUploader(MinioClient):
   pass
 
-uploader = FileUploader()
+def generate_presigned_url(bucket_name: str, object_name: str):
+  client = MinioClient()
+  return client.presigned_input_url(bucket_name, object_name)
