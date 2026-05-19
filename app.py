@@ -1,174 +1,119 @@
-import sys
-import copy
-import os
+from flask import Flask, jsonify, request, stream_with_context, Response
+from base import *
 import logging
-
-import ffmpeg
-from utils import *
-from converter import *
-from etc.config import product_info
+import signal
+from storage.file_uploader import FileUploader, generate_presigned_url
+from minio.error import S3Error
+from transcode import *
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-logger = logging.getLogger()
+logger = logging.Logger(__name__)
 
-BASE_CONF = {
-    "format": "mp4",
-    "movflags": "use_metadata_tags+faststart",
-    "map_metadata": "0:g",
-    "vcodec": "libx264",
-    "vsync": 2,  # variable frame rate
-    "crf": 24,
-    "preset": "veryfast",
-    "acodec": "aac",
-    "audio_bitrate": "96k",
-    "max_muxing_queue_size": 1024,
-}
+app = Flask(__name__)
 
-def transcode_video_impl(input_file, dst_params, hdr_filepath, sdr_filepath):
-    '''
-    @brief Transcode function test
-    @param input_file [in] input file path
-    @param dst_params [in] output file parameters
-    @param hdr_filepath [in] output hdr video path
-    @param sdr_filepath [in] output sdr video path
-    '''
+@app.after_request
+def add_cors_headers(response):
+  response.headers["Access-Control-Allow-Origin"] = "*"
+  response.headers["Access-Control-Allow-Methods"] = "GET,POST,OPTIONS"
+  response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+  response.headers["Access-Control-Expose-Headers"] = "Content-Type"
+  return response
 
-    ori_info = ffprobe_impl(input_file) # get input file information
-    input_file_size = int(ori_info["format"]["size"])
-    min_output_file_size = (
-        input_file_size * product_info["product_key"]["compress_rate_threshold"]
+@app.get("/heal")
+def health():
+  return jsonify({"status": "ok"})
+
+# TODO: add uuid to object_name
+@app.post("/video/<path:object_name>")
+def upload_video(object_name: str):
+  """ upload video
+
+  Args:
+      object_name (str): _description_
+  """
+  bucket = request.args.get("bucket", DEFAULT_BUCKET)
+  client = FileUploader()
+  client.create_bucket(bucket)
+
+  length = request.content_length if request.content_length is not None else -1
+  part_size = 10 * 1024 * 1024 if length == -1 else 0
+
+  try:
+    res = client.upload_from_stream(
+      bucket_name=bucket,
+      object_name=object_name,
+      data_stream=request.stream,
+      length=length,
+      part_size=part_size,
+      content_type=request.content_type or "application/octet-stream",
     )
+  except ValueError as exc:
+    logger.exception("invalid upload request")
+    return jsonify({"error": str(exc)}), 400
+  except S3Error as exc:
+    logger.exception("upload failed")
+    return jsonify({"error": str(exc)}), 502
+  except RuntimeError as exc:
+    logger.exception("storage client error")
+    return jsonify({"error": str(exc)}), 500
 
-    # get video stream and the corresponding information
-    input_video_info = get_video_info(ori_info)
+  return jsonify({"bucket": res.bucket_name, "object": res.object_name})
 
-    # get the name of video stream codec
-    input_file_video_codec = input_video_info["codec_name"]
+# 如果HDR无法播放则需要转SDR的播放地址
+# @example GET /video/demo.mp4/stream?bucket=videos&profile=hdr&width=1920&height=1080
+@app.get("/video/<path:object_name>/stream")
+def get_video_stream(object_name: str):
+    bucket = request.args.get("bucket", DEFAULT_BUCKET)
+    profile = request.args.get("profile", "hdr").lower()
+    dst_width = int(request.args.get("width", DEFAULT_DST_WIDTH))
+    dst_height = int(request.args.get("height", DEFAULT_DST_HEIGHT))
 
-    out_kwargs = copy.deepcopy(BASE_CONF)  # video transcode parameters
+    if profile not in ("hdr", "sdr"):
+        return jsonify({"error": "profile must be 'hdr' or 'sdr'"}), 400
 
-    if product_info["product_key"].get("crf"):
-        out_kwargs["crf"] = product_info["product_key"]["crf"]
+    # example: http://minio:9000/videos/demo.mp4?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=...
+    input_url = generate_presigned_url(bucket, object_name)
+    try:
+        probe_info = ffprobe_impl(input_url)
+        input_video_info = get_video_info(probe_info)
+        out_kwargs = build_realtime_output_kwargs(
+            input_video_info, profile, dst_width, dst_height
+        )
+    except Exception as exc:
+        logger.exception("probe/build output args failed")
+        return jsonify({"error": str(exc)}), 400
 
-    video_color_params(input_video_info, out_kwargs)  # color parameters
-    video_corp(input_video_info, out_kwargs)  # video crop
+    process = spawn_ffmpeg_stream(input_url, out_kwargs)
 
-    video_rescale(
-        input_video_info,
-        out_kwargs,
-        dst_params["dst_width"],
-        dst_params["dst_height"],
-    ) # video re-scale
-
-    hdr_video = check_hdr_video(input_video_info)  # check if hdr video
-    if hdr_video:
-        logger.info("hdr video detected")
-        hdr_kwargs = copy.deepcopy(out_kwargs)
-        if input_video_info.get("codec_tag_string") == "hvc1":
-            hdr_kwargs["tag:v"] = "hvc1"
-
-        # use libx265 if hdr video
-        if input_file_video_codec == "hevc":  # use libx265 if hdr video
-            logger.info("input video codec is hevc")
-            hdr_kwargs.update(
-                {
-                    "vcodec": "libx265",
-                    "crf": product_info["product_key"].get("h265_crf", BASE_CONF["crf"]),
-                }
+    def generate():
+        try:
+            while True:
+                chunk = process.stdout.read(STREAM_CHUNK_SIZE)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            if process.poll() is None:
+                process.send_signal(signal.SIGTERM)
+            stderr = (
+                process.stderr.read().decode("utf-8", errors="ignore")
+                if process.stderr
+                else ""
             )
-            add_hdr_x265_params(hdr_kwargs, input_video_info)
+            return_code = process.wait()
+            if return_code not in (0, -signal.SIGTERM) and stderr:
+                logger.error("ffmpeg stream failed: %s", stderr)
 
-        # QUESTION need test: add x264-params, in case of some videos are encoded by x264 ?
-
-        # hdr video transcode
-        logger.info("transcode into hdr video")
-        _ = _ffmpeg_impl(input_file, hdr_kwargs, min_output_file_size, hdr_filepath)
-
-    convert_hdr2sdr(out_kwargs)
-    # TODO need test: improve x264 parameters
-    add_x264_params(out_kwargs)
-
-    if out_kwargs.get("vf"):
-        if "format" not in out_kwargs["vf"]:
-            out_kwargs["vf"] += ",format=yuv420p"
-    else:
-        out_kwargs["vf"] = "format=yuv420p"
-
-    logger.info("transcode into sdr video")
-    out_info = _ffmpeg_impl(input_file, out_kwargs, min_output_file_size, sdr_filepath)
-    output_video_info = get_video_info(out_info)
-
-    video_rotate = output_video_info.get("tags", {}).get("rotate", 0)
-    if abs(int(video_rotate)) in (90, 270):
-        new_file_height, new_file_width = (
-            output_video_info["width"],
-            output_video_info["height"],
-        )
-    else:
-        new_file_width, new_file_height = (
-            output_video_info["width"],
-            output_video_info["height"],
-        )
-
-    logger.info("transcode succeed.")
-    return
-
-# @brief ffprobe
-def ffprobe_impl(input_file, headers = None):
-    if headers is not None:
-        info = ffmpeg.probe(input_file, headers=headers)
-    else:
-        info = ffmpeg.probe(input_file)
-
-    return info
-
-
-def _ffmpeg_impl(input_file, out_kwargs, min_output_file_size, output_file_path):
-    info = ffprobe_impl(input_file)
-    if int(info["format"]["size"]) > product_info["product_key"]["big_file_size"]:
-        max_crf_adj_num = 1
-    else:
-        max_crf_adj_num = product_info["product_key"]["max_crf_adj_num"]
-
-    os.makedirs(os.path.dirname(output_file_path), exist_ok=True)   # make sure the output file path exists
-
-    for _ in range(max_crf_adj_num):
-        (
-            ffmpeg.input(input_file, noautorotate=None)
-            .output(output_file_path, **out_kwargs)
-            .run(quiet=True, overwrite_output=True)
-        )
-
-        new_info = ffprobe_impl(output_file_path)
-        if(
-            (not min_output_file_size) or
-            int(new_info["format"]["size"]) > min_output_file_size or
-            out_kwargs["crf"] <= 0
-        ) :
-            break
-        else:
-            out_kwargs["crf"] -= product_info["product_key"]["crf_step_size"]
-
-    # no need to upload
-    return new_info
-
-# @brief main function
-def main(source_file, hdr_file, sdr_file):
-    output_file_params = {
-        "dst_width": 1920,
-        "dst_height": 1080,
+    headers = {
+      "Content-Type": "video/mp4",
+      "Cache-Control": "no-store",
+      "X-Accel-Buffering": "no",
     }
-    transcode_video_impl(source_file, output_file_params, hdr_file, sdr_file)
-    return
+    return Response(stream_with_context(generate()), headers=headers, direct_passthrough=True)
 
-if __name__ == '__main__':
-    source = sys.argv[1]
-    hdr = sys.argv[2]
-    sdr = sys.argv[3]
-
-    # calculate duration
-    import time
-    start = time.time()
-    main(source, hdr, sdr)
-    end = time.time()
-    logger.info("duration: %ss", end - start)
+if __name__ == "__main__":
+    app.run(
+        host=os.getenv("FLASK_HOST", "0.0.0.0"),
+        port=int(os.getenv("FLASK_PORT", "5000")),
+        debug=True,
+    )
