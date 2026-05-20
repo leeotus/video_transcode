@@ -30,7 +30,7 @@ def _get_side_data_types(video_info):
         for item in side_data_list
         if isinstance(item, dict)
     ]
-    
+
 def _find_side_data(video_info, keyword:str):
     """ find the side_data according to the input keyword
 
@@ -39,16 +39,16 @@ def _find_side_data(video_info, keyword:str):
         keyword (str): side_data_type keyword
     """
     side_data_list = video_info.get("side_data_list") or []
-    
+
     for side_data in side_data_list:
         if not isinstance(side_data, dict):
             continue
-        
+
         # get side data type
         side_data_type = str(side_data.get("side_data_type", "")).lower()
         if keyword.lower() in side_data_type:
             return side_data    # already found the side_data
-        
+
         return None
 
 def detect_hdr_format(video_info):
@@ -81,7 +81,7 @@ def detect_hdr_format(video_info):
 
     return "sdr"
 
-def _build_master_display(video_info):
+def build_master_display(video_info):
     metadata_keyword = "Mastering display metadata"
     side_data = _find_side_data(video_info, metadata_keyword)
     if not side_data:
@@ -120,7 +120,7 @@ def _build_master_display(video_info):
         f"L({max_luminance},{min_luminance})"
     )
 
-def _build_max_cll(video_info):
+def build_max_cll(video_info):
     metadata_keyword = "Content light level metadata"
     side_data = _find_side_data(video_info, metadata_keyword)
     if not side_data:

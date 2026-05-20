@@ -1,7 +1,7 @@
 import logging
 from constant import *
-from utils import _build_master_display
-from utils import _build_max_cll
+from utils import build_master_display
+from utils import build_max_cll
 from utils import detect_hdr_format
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -109,7 +109,7 @@ def add_hdr_x265_params(out_kwargs, video_info, *, enable_quality_params = True)
             "psy-rd":"2.0",
             "psy-rdoq":"1.0",
         })
-        
+
     # TODO: detect hdr10+ format
     if hdr_format in ("hdr10", "dolby_vision"):
         params.update({
@@ -121,15 +121,15 @@ def add_hdr_x265_params(out_kwargs, video_info, *, enable_quality_params = True)
             "transfer": "smpte2084",
             "colormatrix": "bt2020nc",
         })
-        
-        master_display = _build_master_display(video_info)
+
+        master_display = build_master_display(video_info)
         if master_display:
             params["master-display"] = master_display
-            
-        max_cll = _build_max_cll(video_info)
+
+        max_cll = build_max_cll(video_info)
         if max_cll:
             params["max-cll"] = max_cll
-        
+
         if hdr_format in ("dolby_vision"):
             logger.warning("%s dynamic metadata not supported yet", hdr_format)
     elif hdr_format in ("hlg"):
@@ -143,14 +143,14 @@ def add_hdr_x265_params(out_kwargs, video_info, *, enable_quality_params = True)
                 "colormatrix": "bt2020nc",
             }
         )
-        
+
     _merge_x265_params(out_kwargs, params)
-    
+
 def add_x264_params(out_kwargs):
     if out_kwargs.get("vcodec", "") != "libx264":
         logger.info("vcodec is not libx264, skip adding x264 params")
         return
-    
+
     out_kwargs.update(
         {
             "pix_fmt": "yuv420p",
@@ -158,7 +158,7 @@ def add_x264_params(out_kwargs):
             "level:v": "4.1",
             "tag:v": "avc1",
             "preset": "veryfast",
-            
+
             "x264-params": (
                 "keyint=60:"
                 "min-keyint=30:"

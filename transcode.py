@@ -71,7 +71,7 @@ def transcode_video_impl(input_file, dst_params, hdr_filepath, sdr_filepath):
             hdr_kwargs["tag:v"] = "hvc1"
 
         # use libx265 if hdr video
-        if input_file_video_codec == "hevc":  # use libx265 if hdr video
+        if input_file_video_codec == "hevc":
             logger.info("input video codec is hevc")
             hdr_kwargs.update(
                 {
