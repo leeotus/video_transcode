@@ -27,7 +27,7 @@ services:
     command: server /data --console-address ":9001"
     networks:
       - video_transcode_net
-    
+
   redis8379:
     image: redis:latest
     container_name: redis8379
@@ -39,12 +39,24 @@ services:
     command: redis-server --appendonly yes
     networks:
       - video_transcode_net
-    
+
+  mongo27017:
+    image: mongo:latest
+    container_name: mongo27017
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - video_transcode_net
+
 
 volumes:
   mysql84_data:
   minio_data:
   redis_data:
+  mongo_data:
 
 networks:
   video_transcode_net:
