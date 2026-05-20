@@ -5,6 +5,7 @@ import signal
 from storage.file_uploader import FileUploader, generate_presigned_url
 from minio.error import S3Error
 from transcode import *
+from vod.service import create_video_upload, find_video, get_stream
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.Logger(__name__)
@@ -23,14 +24,48 @@ def add_cors_headers(response):
 def health():
   return jsonify({"status": "ok"})
 
-# TODO: add uuid to object_name
+@app.post("/api/videos")
+def upload_vod_video():
+  file_storage = request.files.get("file")
+  display_name = request.form.get("name") or request.form.get("display_name")
+  try:
+    payload = create_video_upload(file_storage, display_name)
+  except ValueError as exc:
+    return jsonify({"error": str(exc)}), 400
+  except Exception as exc:
+    logger.exception("create VOD upload failed")
+    return jsonify({"error": str(exc)}), 500
+  return jsonify(payload), 202
+
+@app.get("/api/videos/<video_id>")
+def get_vod_video(video_id: str):
+  try:
+    payload = find_video(video_id)
+  except Exception as exc:
+    logger.exception("get VOD video failed")
+    return jsonify({"error": str(exc)}), 500
+  if not payload:
+    return jsonify({"error": "video not found"}), 404
+  return jsonify(payload)
+
+@app.get("/api/videos/<video_id>/streams/<profile>")
+def get_vod_stream(video_id: str, profile: str):
+  try:
+    payload = get_stream(video_id, profile.lower())
+  except ValueError as exc:
+    return jsonify({"error": str(exc)}), 400
+  except Exception as exc:
+    logger.exception("get VOD stream failed")
+    return jsonify({"error": str(exc)}), 500
+  if not payload:
+    return jsonify({"error": "video not found"}), 404
+  if not payload.get("ready"):
+    return jsonify(payload), 202
+  return jsonify(payload)
+
+# Legacy realtime upload API. Kept for compatibility during migration.
 @app.post("/video/<path:object_name>")
 def upload_video(object_name: str):
-  """ upload video
-
-  Args:
-      object_name (str): _description_
-  """
   bucket = request.args.get("bucket", DEFAULT_BUCKET)
   client = FileUploader()
   client.create_bucket(bucket)
@@ -59,8 +94,7 @@ def upload_video(object_name: str):
 
   return jsonify({"bucket": res.bucket_name, "object": res.object_name})
 
-# 如果HDR无法播放则需要转SDR的播放地址
-# @example GET /video/demo.mp4/stream?bucket=videos&profile=hdr&width=1920&height=1080
+# Legacy realtime stream API. Will be removed after VOD HLS frontend migration.
 @app.get("/video/<path:object_name>/stream")
 def get_video_stream(object_name: str):
     bucket = request.args.get("bucket", DEFAULT_BUCKET)
