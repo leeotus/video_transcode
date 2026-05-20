@@ -14,6 +14,7 @@ product_info = {
 
 minio_config = {
     "endpoint": "127.0.0.1:7000",   # minio endpoint
+    "public_base_url": "http://127.0.0.1:7000",
     "access_key": "minioadmin",     # minio access_key
     "secret_key": "minioadmin123",  # minio secret_key
     "secure": False,
