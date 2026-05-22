@@ -49,7 +49,7 @@ def _find_side_data(video_info, keyword:str):
         if keyword.lower() in side_data_type:
             return side_data    # already found the side_data
         
-        return None
+    return None
 
 def detect_hdr_format(video_info):
     """ detect hdr format
